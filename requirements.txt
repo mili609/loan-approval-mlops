@@ -8,3 +8,5 @@ dvc==3.67.1
 fastapi==0.141.1
 uvicorn==0.53.0
 pydantic==2.13.5
+pytest==9.1.1
+pytest-cov==7.1.0

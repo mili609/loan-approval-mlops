@@ -64,6 +64,11 @@ class PredictionResponse(BaseModel):
     approval_probability: float
 
 
+@app.get("/")
+def root() -> dict:
+    return {"message": "Loan Approval Prediction API", "docs": "/docs"}
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "model_loaded": model is not None}

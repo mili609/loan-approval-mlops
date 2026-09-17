@@ -9,3 +9,8 @@ mlflow.db
 
 # DVC-managed pipeline outputs (tracked via dvc.lock, not committed directly)
 /data/processed/
+
+# Pytest / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
