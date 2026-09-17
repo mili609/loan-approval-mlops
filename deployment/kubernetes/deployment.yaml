@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loan-approval-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loan-approval-api
+  template:
+    metadata:
+      labels:
+        app: loan-approval-api
+    spec:
+      containers:
+        - name: loan-approval-api
+          image: localhost:5000/loan-approval-api:monitoring-v2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
