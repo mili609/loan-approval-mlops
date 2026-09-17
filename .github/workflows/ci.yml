@@ -25,8 +25,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests
+        env:
+          PYTHONPATH: .
         run: |
-          pytest -v --cov=src --cov=app.py
+          pytest -v --cov=src --cov=app
 
       - name: Build Docker image
         run: |
