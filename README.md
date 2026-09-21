@@ -1,138 +1,263 @@
-# Loan Approval Prediction — MLOps Project
+# Loan Approval Prediction — End-to-End MLOps System
 
-Predicts whether a loan application will be approved, built as an
-end-to-end MLOps pipeline: data validation, versioned data (DVC),
-experiment tracking (MLflow), and a containerized prediction API
-(FastAPI).
+## 1. Project Overview
 
-## Project Structure
+This project implements an **end-to-end MLOps pipeline** for predicting loan approval outcomes. It goes beyond a standalone ML model and covers the full lifecycle of a production ML system:
+
+- Data versioning with **DVC**
+- Automated data validation
+- Feature engineering and model training with **scikit-learn**
+- Experiment tracking with **MLflow**
+- Automated testing with **Pytest**
+- Containerization with **Docker**
+- Continuous Integration with **GitHub Actions**
+- Deployment to **Kubernetes**
+- A **FastAPI** serving layer
+- Monitoring with **Prometheus** and **Grafana**
+
+The goal is to demonstrate how a machine learning model moves from raw data to a monitored, containerized, and orchestrated production service.
+
+## 2. Project Structure
 
 ```
-├── app.py                      # FastAPI serving app
-├── dvc.yaml                    # DVC pipeline: validate -> prepare -> train
-├── Dockerfile                  # Container image for the API
+loan-approval-mlops/
 ├── data/
-│   ├── raw/loan_data.csv       # Raw dataset (DVC-tracked, not in git)
-│   └── processed/              # Train/test split produced by the pipeline
-├── models/loan_approval_model.joblib  # Best model (preprocessing + classifier)
-├── mlruns/, mlflow.db          # Local MLflow tracking store
-├── notebooks/loan_approval.ipynb      # Exploratory analysis + pipeline walkthrough
-└── src/
-    ├── validation/data_validation.py       # Schema/target/duplicate checks
-    ├── transformation/data_transformation.py  # Preprocessing + train/test split
-    └── training/
-        ├── model_training.py       # Train/evaluate/select/save candidate models
-        └── mlflow_tracking.py      # Logs each candidate model as an MLflow run
+│   ├── raw/                     # Raw dataset, tracked with DVC
+│   │   ├── loan_data.csv
+│   │   └── loan_data.csv.dvc
+│   └── processed/               # Train/test splits produced by the pipeline
+│       ├── train.csv
+│       └── test.csv
+├── notebooks/
+│   └── loan_approval.ipynb      # Exploratory data analysis
+├── src/
+│   ├── validation/
+│   │   └── data_validation.py   # Schema, target and duplicate checks
+│   ├── transformation/
+│   │   └── data_transformation.py  # Feature engineering pipeline
+│   └── training/
+│       ├── model_training.py       # Train/evaluate/select/save models
+│       └── mlflow_tracking.py      # MLflow experiment logging
+├── tests/
+│   ├── test_data_validation.py
+│   ├── test_data_transformation.py
+│   ├── test_model.py
+│   └── test_api.py
+├── deployment/
+│   └── kubernetes/
+│       ├── deployment.yaml      # FastAPI Kubernetes Deployment
+│       └── service.yaml         # FastAPI Kubernetes Service (NodePort)
+├── monitoring/
+│   ├── prometheus.yml               # Prometheus scrape config
+│   ├── prometheus-configmap.yaml    # Prometheus config as a K8s ConfigMap
+│   ├── prometheus-deployment.yaml   # Prometheus Kubernetes Deployment
+│   ├── prometheus-service.yaml      # Prometheus Kubernetes Service
+│   └── grafana/
+│       ├── deployment.yaml          # Grafana Kubernetes Deployment
+│       └── service.yaml             # Grafana Kubernetes Service
+├── .github/
+│   └── workflows/
+│       └── ci.yml                # GitHub Actions CI pipeline
+├── models/
+│   └── loan_approval_model.joblib   # Best model artifact (pipeline + model)
+├── app.py                        # FastAPI application
+├── Dockerfile                    # Container image for the FastAPI service
+├── dvc.yaml                      # DVC pipeline stages (validate → prepare → train)
+├── requirements.txt
+└── README.md
 ```
 
-## Dataset
+## 3. MLOps Pipeline
 
-614 loan applications with 13 columns (`data/raw/loan_data.csv`), target
-`loan_status` (`y`/`n`, ~69% approved / 31% rejected). Several columns
-have missing values, which the preprocessing pipeline imputes
-(median for numerical, most-frequent for categorical).
+The system follows this pipeline flow:
 
-## Setup
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-pip install -r requirements.txt
+```
+Data → DVC → Validation → Feature Engineering → Model Training → MLflow
+     → Pytest → Docker → GitHub Actions → Kubernetes → FastAPI
+     → Prometheus → Grafana
 ```
 
-Pull the raw data (tracked with DVC):
+1. Raw loan data is versioned with **DVC**.
+2. **Validation** checks schema, target integrity, and duplicates before anything downstream runs.
+3. **Feature engineering** (imputation, scaling, one-hot encoding) is built as a reusable scikit-learn pipeline.
+4. **Model training** fits and compares candidate models.
+5. **MLflow** logs parameters, metrics, and artifacts for each candidate run.
+6. **Pytest** verifies validation, transformation, training, and API behavior.
+7. **Docker** packages the FastAPI serving app and trained model into a single image.
+8. **GitHub Actions** runs tests and builds the Docker image on every push/PR.
+9. **Kubernetes** deploys the containerized API.
+10. **FastAPI** serves real-time predictions and exposes a `/metrics` endpoint.
+11. **Prometheus** scrapes those metrics, and **Grafana** visualizes them on a dashboard.
 
-```bash
-dvc pull
-```
+## 4. Data Versioning (DVC)
 
-## Running the Pipeline
+The raw loan dataset (`data/raw/loan_data.csv`) is tracked using **DVC** (`data/raw/loan_data.csv.dvc`), keeping large data files out of Git while still versioning them alongside the code. The DVC pipeline is defined in [dvc.yaml](dvc.yaml) with three stages: `validate`, `prepare` (feature engineering/train-test split), and `train`.
 
-The pipeline has three stages, defined in `dvc.yaml`:
+## 5. Data Validation
 
-1. **validate** — checks required columns, target validity, and duplicates.
-2. **prepare** — splits features/target, does a stratified train/test split,
-   and writes `data/processed/train.csv` / `test.csv`.
-3. **train** — trains Logistic Regression and Random Forest, evaluates both
-   on the held-out test set, logs each as an MLflow run, and saves the
-   best model (by F1-score) to `models/loan_approval_model.joblib`.
+Before training, [src/validation/data_validation.py](src/validation/data_validation.py) runs automated checks on the raw dataset:
 
-Run the full pipeline:
+- **Schema validation** — confirms all required columns are present.
+- **Target validation** — ensures the `loan_status` target column exists and has no missing values.
+- **Duplicate check** — verifies there are no duplicate records.
 
-```bash
-dvc repro
-```
+The pipeline fails fast with a clear error if any check does not pass.
 
-Or run stages individually:
+## 6. Model Training
 
-```bash
-python -m src.validation.data_validation
-python -m src.transformation.data_transformation
-python -m src.training.mlflow_tracking
-```
+Two candidate models are trained on the same preprocessed data (imputation, scaling, one-hot encoding) and evaluated on a held-out test set:
 
-Inspect experiment results:
+**Logistic Regression**
+
+| Metric    | Score  |
+|-----------|--------|
+| Accuracy  | 0.8618 |
+| Precision | 0.8400 |
+| Recall    | 0.9882 |
+| F1-score  | 0.9081 |
+
+**Random Forest**
+
+| Metric    | Score  |
+|-----------|--------|
+| Accuracy  | 0.8211 |
+| Precision | 0.8462 |
+| Recall    | 0.9059 |
+| F1-score  | 0.8750 |
+
+**Logistic Regression was selected as the final model based on its higher F1-score**, since F1 balances precision and recall — a more reliable choice than raw accuracy on this imbalanced target. The selected model is saved as [models/loan_approval_model.joblib](models/loan_approval_model.joblib).
+
+## 7. MLflow Experiment Tracking
+
+Both candidate models (Logistic Regression and Random Forest) are tracked as separate **MLflow runs** within a single experiment (`Loan Approval Prediction`). Each run logs:
+
+- Model hyperparameters
+- Evaluation metrics (accuracy, precision, recall, F1-score)
+- A confusion matrix artifact
+- The fitted preprocessing + model pipeline
+
+Tracking uses a local SQLite store (`mlflow.db`) with artifacts in `mlruns/`, so no external MLflow server is required. View runs with:
 
 ```bash
 mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-then open http://127.0.0.1:5000.
+## 8. Testing
 
-### Current results
+The project uses **Pytest** for automated testing:
 
-| Model               | Accuracy | Precision | Recall | F1-score |
-|---------------------|---------:|----------:|-------:|---------:|
-| Logistic Regression | 0.8618   | 0.8400    | 0.9882 | **0.9081** |
-| Random Forest        | 0.8211   | 0.8462    | 0.9059 | 0.8750   |
+- **35 tests passed**
+- **76% code coverage**
+- Tests cover data validation, data transformation, model training, and FastAPI API behavior (`tests/test_data_validation.py`, `tests/test_data_transformation.py`, `tests/test_model.py`, `tests/test_api.py`).
 
-Logistic Regression is selected as the best model (highest F1-score, which
-matters more than accuracy given the class imbalance).
+Run the test suite with coverage:
 
-## Serving Predictions
+```bash
+pytest -v --cov=src --cov=app
+```
 
-Start the API locally:
+## 9. FastAPI Service
+
+The trained model is served via a FastAPI application ([app.py](app.py)):
+
+| Method | Endpoint    | Description                                      |
+|--------|-------------|---------------------------------------------------|
+| GET    | `/`         | API info (name, docs link, metrics link)          |
+| GET    | `/health`   | Health check + model load status                  |
+| POST   | `/predict`  | Predicts loan approval for a given application    |
+| GET    | `/metrics`  | Prometheus-formatted metrics                       |
+
+Interactive API documentation (Swagger UI) is available at **`/docs`**.
+
+Run locally:
 
 ```bash
 uvicorn app:app --reload
 ```
 
-Open http://127.0.0.1:8000/docs for interactive Swagger docs, or call it directly:
+## 10. Docker
 
-```bash
-curl -X POST http://127.0.0.1:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-        "gender": "male", "married": "yes", "dependents": "0",
-        "education": "graduate", "self_employed": "no",
-        "applicantincome": 5849, "coapplicantincome": 0,
-        "loanamount": 128, "loan_amount_term": 360,
-        "credit_history": 1, "property_area": "urban"
-      }'
-```
-
-Response:
-
-```json
-{"loan_status": "Approved", "approved": true, "approval_probability": 0.815}
-```
-
-`GET /health` reports whether the model artifact loaded successfully.
-
-## Docker
+Build and run the FastAPI service in a container:
 
 ```bash
 docker build -t loan-approval-api .
 docker run -p 8000:8000 loan-approval-api
 ```
 
-The image bundles the trained model artifact, so `models/loan_approval_model.joblib`
-must exist (run the training pipeline) before building.
+## 11. GitHub Actions (CI)
 
-## Tech Stack
+Continuous Integration is defined at [.github/workflows/ci.yml](.github/workflows/ci.yml) and runs automatically on every push/PR to `master`:
 
-pandas, scikit-learn, joblib — data processing and modeling
-DVC — data versioning and pipeline reproducibility
-MLflow — experiment tracking
-FastAPI + uvicorn — model serving
-Docker — containerization
+1. Install dependencies from `requirements.txt`.
+2. Run the **Pytest** suite with coverage (`pytest -v --cov=src --cov=app`).
+3. Build the **Docker** image (`docker build -t loan-approval-api .`).
+
+This ensures every change is tested and remains containerizable before merging.
+
+## 12. Kubernetes Deployment
+
+The FastAPI application is deployed to Kubernetes using the manifests in [deployment/kubernetes/](deployment/kubernetes/):
+
+- **[deployment.yaml](deployment/kubernetes/deployment.yaml)** — a Kubernetes **Deployment** (`loan-approval-api`) running **1 replica** of the container on port `8000`.
+- **[service.yaml](deployment/kubernetes/service.yaml)** — a Kubernetes **Service** (`loan-approval-service`) exposing port `8000` via **NodePort**.
+
+Deploy with:
+
+```bash
+kubectl apply -f deployment/kubernetes/deployment.yaml
+kubectl apply -f deployment/kubernetes/service.yaml
+```
+
+The `/health` endpoint was tested successfully against the running Kubernetes service, confirming the deployed pod loads the model and serves traffic correctly.
+
+## 13. Monitoring (Prometheus + Grafana)
+
+The FastAPI app exposes a **`/metrics`** endpoint (via `prometheus-client`) with custom metrics:
+
+- `loan_prediction_requests_total` — total prediction requests
+- `loan_approved_total` — total approved predictions
+- `loan_rejected_total` — total rejected predictions
+- `loan_prediction_latency_seconds` — prediction latency histogram
+
+**Prometheus** is deployed on Kubernetes ([monitoring/prometheus-deployment.yaml](monitoring/prometheus-deployment.yaml), [monitoring/prometheus-service.yaml](monitoring/prometheus-service.yaml)) and configured via [monitoring/prometheus-configmap.yaml](monitoring/prometheus-configmap.yaml) / [monitoring/prometheus.yml](monitoring/prometheus.yml) to scrape `loan-approval-service:8000/metrics` every 15 seconds.
+
+**Grafana** is deployed on Kubernetes ([monitoring/grafana/deployment.yaml](monitoring/grafana/deployment.yaml), [monitoring/grafana/service.yaml](monitoring/grafana/service.yaml)) with **Prometheus configured as its datasource**. The Grafana dashboard visualizes:
+
+- Total Loan Predictions
+- Approved Loans
+- Rejected Loans
+- Prediction Latency
+
+## 14. Reproducibility
+
+Clone the repository and reproduce the full pipeline end-to-end:
+
+```bash
+# Run the DVC pipeline (validate → prepare → train)
+dvc repro
+
+# Run the test suite
+pytest -v --cov=src --cov=app
+
+# Build the Docker image
+docker build -t loan-approval-api .
+
+# Deploy to Kubernetes
+kubectl apply -f deployment/kubernetes/deployment.yaml
+kubectl apply -f deployment/kubernetes/service.yaml
+```
+
+## 15. Tech Stack
+
+- **Python**
+- **pandas**
+- **scikit-learn**
+- **DVC**
+- **MLflow**
+- **Pytest**
+- **FastAPI**
+- **Docker**
+- **GitHub Actions**
+- **Kubernetes**
+- **Prometheus**
+- **Grafana**
